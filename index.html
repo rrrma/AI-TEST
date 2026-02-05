@@ -259,6 +259,7 @@ function finalize(){
 }
 
 /* --- submit logic with confirmation and Formspree POST --- */
+// ====== form-urlencoded 전송으로 대체 (붙여넣기용) ======
 doneBtn.addEventListener('click', async ()=> {
   if(saving) return;
   const ok = confirm('제출 완료 후 응답 수정은 불가능합니다. 제출하시겠습니까?');
@@ -280,7 +281,6 @@ doneBtn.addEventListener('click', async ()=> {
     userAgent: navigator.userAgent
   };
 
-  // If no endpoint configured, show message and return
   if(!POST_ENDPOINT){
     saveMsg.innerText = '저장 기능이 설정되어 있지 않습니다 (POST_ENDPOINT 비어있음).';
     doneBtn.disabled = false;
@@ -289,24 +289,41 @@ doneBtn.addEventListener('click', async ()=> {
   }
 
   try {
+    // form-urlencoded body 구성
+    const form = new URLSearchParams();
+    form.append('submitted_at', payload.submitted_at);
+    form.append('name', payload.name);
+    form.append('employeeId', payload.employeeId);
+    form.append('department', payload.department);
+    form.append('totalScore', String(payload.totalScore));
+    form.append('category', payload.category);
+    form.append('answers', JSON.stringify(payload.answers));
+    form.append('scores', JSON.stringify(payload.scores));
+    form.append('userAgent', payload.userAgent);
+
     const res = await fetch(POST_ENDPOINT, {
       method: 'POST',
-      headers: {'Content-Type':'application/json'},
-      body: JSON.stringify(payload)
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded;charset=UTF-8' },
+      body: form.toString()
     });
 
-    if(res.ok){
-      // success - Formspree typically returns 200
+    // 응답 텍스트로 받아서 JSON 파싱 시도
+    const txt = await res.text().catch(()=> '');
+    let j = null;
+    try { j = txt ? JSON.parse(txt) : null; } catch(e){ j = null; }
+
+    if(res.ok && (j && j.status === 'ok' || !j)){
       saveMsg.innerText = '제출이 완료되었습니다.';
+    } else if (j && j.status === 'duplicate'){
+      saveMsg.innerText = '중복 제출로 저장되지 않았습니다.';
+      doneBtn.disabled = true;
     } else {
-      // attempt to read JSON for message
-      let txt = '';
-      try { const j = await res.json(); txt = j.message || JSON.stringify(j); } catch(e){ txt = await res.text().catch(()=> '서버 응답 실패'); }
-      saveMsg.innerText = '저장 실패: ' + txt;
+      saveMsg.innerText = '저장 실패: ' + (j && j.message ? j.message : txt || '서버 응답 오류');
       doneBtn.disabled = false;
       saving = false;
       return;
     }
+
   } catch(err){
     console.error(err);
     saveMsg.innerText = '저장 실패. 네트워크 상태를 확인하세요.';
@@ -315,10 +332,11 @@ doneBtn.addEventListener('click', async ()=> {
     return;
   }
 
-  // keep button disabled to prevent re-submission
+  // 성공 상태: 버튼 잠금 유지
   doneBtn.disabled = true;
   saving = false;
 });
+
 
 /* =========================
    mobile viewport handling (visualViewport-aware)
