@@ -10,7 +10,6 @@
     --gap:12px; --font-size:17px;
   }
   html,body{height:100%;margin:0;padding:0;font-family:system-ui,-apple-system,"Noto Sans KR",Roboto,Arial,sans-serif;background:var(--bg);-webkit-text-size-adjust:none;}
-  /* not allowing outer scroll; main handles scroll */
   body{overflow:hidden}
   .wrap{min-height:100vh;box-sizing:border-box;padding:env(safe-area-inset-top) 14px env(safe-area-inset-bottom);display:flex;flex-direction:column;align-items:stretch;}
   header{padding:12px 0 6px;}
@@ -32,8 +31,8 @@
   .result-big{font-size:20px;font-weight:700;color:#111;margin:10px 0}
   .muted{color:var(--muted);font-size:13px}
   .error{color:#b00020;font-size:13px;margin-top:8px}
-  /* ensure no horizontal scroll */
   body, .wrap, main{min-width:0}
+  .debug {font-size:12px;color:#777;margin-top:8px}
 </style>
 </head>
 <body>
@@ -41,6 +40,7 @@
     <header>
       <h1>AI 업무적용 역량 인증 자가진단</h1>
       <div class="desc">간단한 자가진단. 총 소요 약 5분</div>
+      <div class="debug" id="ver">version: v1</div>
     </header>
 
     <main id="mainArea">
@@ -71,7 +71,6 @@
         <div style="height:8px"></div>
         <div style="display:flex;gap:8px;">
           <button id="prevBtn" class="btn secondary" style="flex:0 0 120px;display:none">이전</button>
-          <!-- nextBtn hidden because auto-advance on choice -->
           <button id="nextBtn" class="btn" style="flex:1;display:none">다음</button>
         </div>
       </div>
@@ -87,22 +86,17 @@
           <button id="doneBtn" class="btn">제출(완료)</button>
         </div>
         <div id="saveMsg" style="margin-top:12px"></div>
+        <div id="rawResp" style="margin-top:8px;font-size:12px;color:#666"></div>
       </div>
     </main>
 
   </div>
 
 <script>
-/* =========================
-   설정: POST endpoint 설정
-   - Formspree로 전송하려면 여기에 Formspree 엔드포인트를 넣을 것
-   - 예: "https://formspree.io/f/xxxxxxxx"
-   ========================= */
-const POST_ENDPOINT = "https://script.google.com/macros/s/AKfycby-PE4j9gCV36jZKDFLyl8DoL2wJ50P7uZ92_Lxzq3J2lMPKYI9LWI-mTb0iKEY3f5-8A/exec"; // <-- 여기에 Formspree URL 넣기 (따옴표 유지)
+/* POST endpoint */
+const POST_ENDPOINT = "https://script.google.com/macros/s/AKfycby-PE4j9gCV36jZKDFLyl8DoL2wJ50P7uZ92_Lxzq3J2lMPKYI9LWI-mTb0iKEY3f5-8A/exec";
 
-/* =========================
-   질문/선지/점수(8문항)
-   ========================= */
+/* questions same as before (omitted here for brevity in this note) */
 const questions = [
   {"id":"Q1","text":"최근 업무에서 생성형 AI를 실제로 사용해본 경험에 가장 가까운 것은 무엇인가요?","choices":[
     {"k":"a","t":"업무에서는 사용해본 적 없음 (개인적 사용만)","s":0},
@@ -160,7 +154,7 @@ let current = 0;
 let user = {name:"", emp:"", dept:""};
 let saving = false;
 
-/* --- DOM elements --- */
+/* DOM */
 const mainArea = document.getElementById('mainArea');
 const introEl = document.getElementById('intro');
 const surveyEl = document.getElementById('survey');
@@ -178,10 +172,13 @@ const doneBtn = document.getElementById('doneBtn');
 const totalScoreEl = document.getElementById('totalScore');
 const categoryEl = document.getElementById('category');
 const saveMsg = document.getElementById('saveMsg');
+const rawResp = document.getElementById('rawResp');
+const verEl = document.getElementById('ver');
 
 totalSteps.innerText = questions.length;
+verEl.innerText = 'version: v2 (replace & hard-refresh)';
 
-/* --- Input validation and start --- */
+/* validation/start */
 function validateIntroInputs(){
   const n = nameInp.value.trim(), e = empInp.value.trim(), d = deptInp.value.trim();
   const pat = /^K\d{6}$/i;
@@ -202,7 +199,7 @@ startBtn.addEventListener('click', ()=> {
   setTimeout(()=> recalcMainHeight(), 60);
 });
 
-/* --- render question and auto-advance on choice --- */
+/* render */
 function renderQuestion(idx){
   current = idx;
   stepNum.innerText = idx+1;
@@ -222,9 +219,7 @@ function renderQuestion(idx){
     el.addEventListener('click', ()=> {
       answers[idx] = c.k;
       scores[idx] = c.s;
-      // visual selection
       Array.from(list.children).forEach((ch,ci)=> ch.classList.toggle('selected', ci===i));
-      // auto advance or finalize
       setTimeout(()=> {
         if(idx < questions.length-1) renderQuestion(idx+1);
         else finalize();
@@ -235,14 +230,12 @@ function renderQuestion(idx){
   });
   qWrap.appendChild(list);
   prevBtn.style.display = idx===0 ? 'none' : 'inline-block';
-  // ensure top of question visible
   mainArea.scrollTop = 0;
   setTimeout(()=> recalcMainHeight(), 40);
 }
-
 prevBtn.addEventListener('click', ()=> { if(current>0) renderQuestion(current-1); });
 
-/* --- finalize and show result --- */
+/* finalize */
 function computeTotal(){ return scores.reduce((a,b)=> a + (parseFloat(b)||0), 0); }
 function classify(total){
   if(total >= 70) return "산출물 트랙(교육 불필요)";
@@ -258,8 +251,7 @@ function finalize(){
   setTimeout(()=> recalcMainHeight(), 60);
 }
 
-/* --- submit logic with confirmation and Formspree POST --- */
-// ====== form-urlencoded 전송으로 대체 (붙여넣기용) ======
+/* --- submit: robust form-urlencoded with debugging --- */
 doneBtn.addEventListener('click', async ()=> {
   if(saving) return;
   const ok = confirm('제출 완료 후 응답 수정은 불가능합니다. 제출하시겠습니까?');
@@ -268,6 +260,7 @@ doneBtn.addEventListener('click', async ()=> {
   saving = true;
   doneBtn.disabled = true;
   saveMsg.innerText = '저장 중...';
+  rawResp.innerText = '';
 
   const payload = {
     submitted_at: new Date().toISOString(),
@@ -289,7 +282,7 @@ doneBtn.addEventListener('click', async ()=> {
   }
 
   try {
-    // form-urlencoded body 구성
+    // form-urlencoded
     const form = new URLSearchParams();
     form.append('submitted_at', payload.submitted_at);
     form.append('name', payload.name);
@@ -301,14 +294,24 @@ doneBtn.addEventListener('click', async ()=> {
     form.append('scores', JSON.stringify(payload.scores));
     form.append('userAgent', payload.userAgent);
 
-    const res = await fetch(POST_ENDPOINT, {
+    // debug output to console and on-screen (so we can confirm what's actually being sent)
+    console.log('DEBUG: POST_ENDPOINT=', POST_ENDPOINT);
+    console.log('DEBUG: Sending content-type: application/x-www-form-urlencoded;charset=UTF-8');
+    console.log('DEBUG: form body=', form.toString());
+    saveMsg.innerText = '디버그: 전송시도 중...';
+
+    const res = await fetch(POST_ENDPOINT + '?_ts=' + Date.now(), {
       method: 'POST',
+      cache: 'no-store',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded;charset=UTF-8' },
       body: form.toString()
     });
 
-    // 응답 텍스트로 받아서 JSON 파싱 시도
-    const txt = await res.text().catch(()=> '');
+    // Try to read response text
+    let txt = '';
+    try { txt = await res.text(); } catch(e){ txt = ''; console.warn('response read failed', e); }
+
+    rawResp.innerText = 'raw response: ' + (txt || '[empty]');
     let j = null;
     try { j = txt ? JSON.parse(txt) : null; } catch(e){ j = null; }
 
@@ -325,22 +328,19 @@ doneBtn.addEventListener('click', async ()=> {
     }
 
   } catch(err){
-    console.error(err);
+    console.error('submit error', err);
     saveMsg.innerText = '저장 실패. 네트워크 상태를 확인하세요.';
+    rawResp.innerText = 'error: ' + (err && err.toString());
     doneBtn.disabled = false;
     saving = false;
     return;
   }
 
-  // 성공 상태: 버튼 잠금 유지
   doneBtn.disabled = true;
   saving = false;
 });
 
-
-/* =========================
-   mobile viewport handling (visualViewport-aware)
-   ========================= */
+/* viewport handling (same as before) */
 let recalcTimer = null;
 function recalcMainHeight(){
   if(recalcTimer) clearTimeout(recalcTimer);
@@ -348,7 +348,7 @@ function recalcMainHeight(){
     recalcTimer = null;
     try{
       const headerH = document.querySelector('header')?.getBoundingClientRect().height || 64;
-      const footH = 0; // footer not fixed here
+      const footH = 0;
       const vv = (window.visualViewport && window.visualViewport.height) ? window.visualViewport.height : window.innerHeight;
       const avail = Math.max(220, Math.floor(vv - headerH - footH - 24));
       const main = document.getElementById('mainArea');
@@ -368,13 +368,13 @@ window.addEventListener('resize', ()=> recalcMainHeight());
 window.addEventListener('orientationchange', ()=> setTimeout(recalcMainHeight,120));
 window.addEventListener('load', ()=> setTimeout(recalcMainHeight,120));
 
-/* focus handling to avoid iOS zoom and keep inputs visible */
+/* focus handling */
 [nameInp, empInp, deptInp].forEach(inp=>{
   inp.addEventListener('focus', ()=> { inp.style.fontSize = '17px'; setTimeout(()=> recalcMainHeight(), 120); });
   inp.addEventListener('blur', ()=> setTimeout(()=> recalcMainHeight(), 60));
 });
 
-/* prevent double-tap zoom on iOS (soft) */
+/* prevent double-tap zoom */
 let lastTouch = 0;
 document.addEventListener('touchend', function(e){
   const now = Date.now();
