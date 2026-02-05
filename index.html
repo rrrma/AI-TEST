@@ -9,8 +9,9 @@
     --bg:#f4f6f8; --card:#fff; --primary:#1466ef; --muted:#6b7280; --radius:12px;
     --gap:12px; --font-size:17px;
   }
-  html,body{height:100%;margin:0;padding:0;font-family:system-ui,-apple-system,"Noto Sans KR",Roboto,Arial,sans-serif;background:var(--bg);-webkit-text-size-adjust:none; -ms-text-size-adjust:100%;}
-  /* safe area for iOS */
+  html,body{height:100%;margin:0;padding:0;font-family:system-ui,-apple-system,"Noto Sans KR",Roboto,Arial,sans-serif;background:var(--bg);-webkit-text-size-adjust:none;}
+  /* not allowing outer scroll; main handles scroll */
+  body{overflow:hidden}
   .wrap{min-height:100vh;box-sizing:border-box;padding:env(safe-area-inset-top) 14px env(safe-area-inset-bottom);display:flex;flex-direction:column;align-items:stretch;}
   header{padding:12px 0 6px;}
   h1{margin:0;font-size:20px}
@@ -18,21 +19,20 @@
   main{flex:1;margin-top:8px;display:flex;flex-direction:column;gap:12px;overflow:auto;padding-bottom:12px;}
   .card{background:var(--card);border-radius:10px;padding:12px;box-shadow:0 4px 12px rgba(0,0,0,0.04);}
   label{display:block;font-size:14px;color:#111;margin-bottom:6px}
-  input[type="text"], input[type="tel"], select, textarea{
+  input[type="text"], input[type="tel"], textarea, select{
     width:100%;box-sizing:border-box;padding:12px;border-radius:10px;border:1px solid #e6edf6;font-size:17px;background:#fff;
   }
   .btn-row{display:flex;gap:10px;margin-top:8px;}
-  .btn{flex:1;padding:12px;border-radius:10px;border:none;background:var(--primary);color:#fff;font-weight:600;font-size:17px;}
+  .btn{flex:1;padding:12px;border-radius:10px;border:none;background:var(--primary);color:#fff;font-weight:600;font-size:17px;cursor:pointer}
   .btn.secondary{background:#fff;border:1px solid #d0d7e6;color:#333}
   .progress{font-size:13px;color:#444;margin-bottom:6px}
   .choices{display:flex;flex-direction:column;gap:10px;margin-top:6px}
-  .choice{padding:12px;border-radius:10px;background:#f7fbff;border:1px solid #e6eefc;text-align:left;font-size:16px;cursor:pointer}
+  .choice{padding:12px;border-radius:10px;background:#f7fbff;border:1px solid #e6eefc;text-align:left;font-size:16px;cursor:pointer;touch-action:manipulation}
   .choice.selected{background:var(--primary);color:#fff;border-color:var(--primary)}
-  footer{padding:8px 0;display:flex;gap:10px;align-items:center;justify-content:center}
   .result-big{font-size:20px;font-weight:700;color:#111;margin:10px 0}
-  /* ensure footer fixed visible on mobile while keyboard open */
-  .footer-placeholder{height:12px}
-  /* make page use full width on mobile, avoid horizontal scroll */
+  .muted{color:var(--muted);font-size:13px}
+  .error{color:#b00020;font-size:13px;margin-top:8px}
+  /* ensure no horizontal scroll */
   body, .wrap, main{min-width:0}
 </style>
 </head>
@@ -44,7 +44,7 @@
     </header>
 
     <main id="mainArea">
-      <!-- Intro / 사용자 정보 -->
+      <!-- Intro -->
       <div id="intro" class="card" aria-labelledby="introTitle">
         <label for="name">이름</label>
         <input id="name" type="text" placeholder="홍길동" autocomplete="name" />
@@ -54,6 +54,8 @@
 
         <label for="dept">부서</label>
         <input id="dept" type="text" placeholder="부서명" />
+
+        <div id="introError" class="error" style="display:none"></div>
 
         <div style="height:8px"></div>
         <div class="btn-row">
@@ -69,7 +71,8 @@
         <div style="height:8px"></div>
         <div style="display:flex;gap:8px;">
           <button id="prevBtn" class="btn secondary" style="flex:0 0 120px;display:none">이전</button>
-          <button id="nextBtn" class="btn" style="flex:1">다음</button>
+          <!-- nextBtn hidden because auto-advance on choice -->
+          <button id="nextBtn" class="btn" style="flex:1;display:none">다음</button>
         </div>
       </div>
 
@@ -85,23 +88,21 @@
         </div>
         <div id="saveMsg" style="margin-top:12px"></div>
       </div>
-
     </main>
 
-    <div class="footer-placeholder"></div>
-    <footer>
-      <div style="width:100%;max-width:900px;display:flex;gap:8px;">
-        <button id="helpBtn" class="btn secondary" style="flex:1">도움말</button>
-      </div>
-    </footer>
   </div>
 
 <script>
 /* =========================
-   설정: 질문/선지/점수
+   설정: POST endpoint 설정
+   - Formspree로 전송하려면 여기에 Formspree 엔드포인트를 넣을 것
+   - 예: "https://formspree.io/f/xxxxxxxx"
    ========================= */
-const POST_ENDPOINT = ""; // 결과를 저장할 서버(예: Apps Script web app URL). 비워두면 전송하지 않음.
+const POST_ENDPOINT = ""; // <-- 여기에 Formspree URL 넣기 (따옴표 유지)
 
+/* =========================
+   질문/선지/점수(8문항)
+   ========================= */
 const questions = [
   {"id":"Q1","text":"최근 업무에서 생성형 AI를 실제로 사용해본 경험에 가장 가까운 것은 무엇인가요?","choices":[
     {"k":"a","t":"업무에서는 사용해본 적 없음 (개인적 사용만)","s":0},
@@ -157,8 +158,10 @@ let answers = Array(questions.length).fill(null);
 let scores = Array(questions.length).fill(0);
 let current = 0;
 let user = {name:"", emp:"", dept:""};
+let saving = false;
 
-/* ---------- UI 핸들링 ---------- */
+/* --- DOM elements --- */
+const mainArea = document.getElementById('mainArea');
 const introEl = document.getElementById('intro');
 const surveyEl = document.getElementById('survey');
 const resultEl = document.getElementById('result');
@@ -166,131 +169,202 @@ const startBtn = document.getElementById('startBtn');
 const nameInp = document.getElementById('name');
 const empInp = document.getElementById('employee');
 const deptInp = document.getElementById('dept');
+const introError = document.getElementById('introError');
 const qWrap = document.getElementById('questionWrap');
 const stepNum = document.getElementById('stepNum');
 const totalSteps = document.getElementById('totalSteps');
 const prevBtn = document.getElementById('prevBtn');
-const nextBtn = document.getElementById('nextBtn');
+const doneBtn = document.getElementById('doneBtn');
 const totalScoreEl = document.getElementById('totalScore');
 const categoryEl = document.getElementById('category');
-const doneBtn = document.getElementById('doneBtn');
 const saveMsg = document.getElementById('saveMsg');
 
 totalSteps.innerText = questions.length;
 
+/* --- Input validation and start --- */
 function validateIntroInputs(){
   const n = nameInp.value.trim(), e = empInp.value.trim(), d = deptInp.value.trim();
-  // 사번 형식 K + 6digits (대/소문자 허용)
   const pat = /^K\d{6}$/i;
   startBtn.disabled = !(n && e && d && pat.test(e));
+  if(!startBtn.disabled) introError.style.display = 'none';
 }
-nameInp.addEventListener('input', validateIntroInputs);
-empInp.addEventListener('input', validateIntroInputs);
-deptInp.addEventListener('input', validateIntroInputs);
+[nameInp, empInp, deptInp].forEach(i => i.addEventListener('input', validateIntroInputs));
 
 startBtn.addEventListener('click', ()=> {
-  user.name = nameInp.value.trim();
-  user.emp = empInp.value.trim().toUpperCase();
-  user.dept = deptInp.value.trim();
+  const n = nameInp.value.trim(), e = empInp.value.trim(), d = deptInp.value.trim();
+  const pat = /^K\d{6}$/i;
+  if(!n || !e || !d){ introError.innerText = '이름·사번·부서를 모두 입력해주세요.'; introError.style.display='block'; return; }
+  if(!pat.test(e)){ introError.innerText = '사번 형식 오류입니다. 예: K123456'; introError.style.display='block'; return; }
+  user = { name: n, emp: e.toUpperCase(), dept: d };
   introEl.style.display = 'none';
   surveyEl.style.display = 'block';
   renderQuestion(0);
+  setTimeout(()=> recalcMainHeight(), 60);
 });
 
+/* --- render question and auto-advance on choice --- */
 function renderQuestion(idx){
   current = idx;
   stepNum.innerText = idx+1;
   const q = questions[idx];
   qWrap.innerHTML = '';
-  const h = document.createElement('div');
-  h.style.fontWeight='700'; h.style.fontSize='16px'; h.innerText = q.text;
-  qWrap.appendChild(h);
+  const title = document.createElement('div');
+  title.style.fontWeight='700'; title.style.fontSize='16px'; title.style.marginBottom='8px';
+  title.innerText = q.text;
+  qWrap.appendChild(title);
 
   const list = document.createElement('div'); list.className='choices';
   q.choices.forEach((c,i)=>{
-    const b = document.createElement('button');
-    b.type='button'; b.className='choice';
-    b.innerText = c.t;
-    b.addEventListener('click', ()=>{
-      // 선택 표시
+    const el = document.createElement('button');
+    el.type = 'button';
+    el.className = 'choice';
+    el.innerText = c.t;
+    el.addEventListener('click', ()=> {
       answers[idx] = c.k;
       scores[idx] = c.s;
-      Array.from(list.children).forEach(ch=> ch.classList.remove('selected'));
-      b.classList.add('selected');
-      // 자동으로 다음으로 (마지막이면 제출 로직 실행)
+      // visual selection
+      Array.from(list.children).forEach((ch,ci)=> ch.classList.toggle('selected', ci===i));
+      // auto advance or finalize
       setTimeout(()=> {
         if(idx < questions.length-1) renderQuestion(idx+1);
         else finalize();
-      }, 180);
+      }, 160);
     });
-    // 이미 선택되어 있으면 보이기
-    if(answers[idx] && answers[idx] === c.k) b.classList.add('selected');
-    list.appendChild(b);
+    el.addEventListener('keydown', ev=> { if(ev.key==='Enter' || ev.key===' ') el.click(); });
+    list.appendChild(el);
   });
   qWrap.appendChild(list);
-
   prevBtn.style.display = idx===0 ? 'none' : 'inline-block';
-  nextBtn.style.display = 'none'; // 자동 advance 사용 -> next 숨김
+  // ensure top of question visible
+  mainArea.scrollTop = 0;
+  setTimeout(()=> recalcMainHeight(), 40);
 }
 
-prevBtn.addEventListener('click', ()=> {
-  if(current>0) renderQuestion(current-1);
-});
+prevBtn.addEventListener('click', ()=> { if(current>0) renderQuestion(current-1); });
 
-/* 제출(마지막) */
-function computeTotal(){ return scores.reduce((a,b)=>a+(parseFloat(b)||0),0); }
+/* --- finalize and show result --- */
+function computeTotal(){ return scores.reduce((a,b)=> a + (parseFloat(b)||0), 0); }
 function classify(total){
   if(total >= 70) return "산출물 트랙(교육 불필요)";
   if(total >= 40) return "교육 트랙(수강 필수)";
   return "기초 안내 대상";
 }
-
 function finalize(){
   surveyEl.style.display = 'none';
   resultEl.style.display = 'block';
   const total = computeTotal();
   totalScoreEl.innerText = total;
   categoryEl.innerText = classify(total);
+  setTimeout(()=> recalcMainHeight(), 60);
 }
 
-/* 완료(서버에 저장) */
-doneBtn.addEventListener('click', ()=> {
+/* --- submit logic with confirmation and Formspree POST --- */
+doneBtn.addEventListener('click', async ()=> {
+  if(saving) return;
+  const ok = confirm('제출 완료 후 응답 수정은 불가능합니다. 제출하시겠습니까?');
+  if(!ok) return;
+
+  saving = true;
   doneBtn.disabled = true;
   saveMsg.innerText = '저장 중...';
+
   const payload = {
-    timestamp: (new Date()).toISOString(),
-    user, answers, scores, total: computeTotal(), category: classify(computeTotal())
+    submitted_at: new Date().toISOString(),
+    name: user.name,
+    employeeId: user.emp,
+    department: user.dept,
+    totalScore: computeTotal(),
+    category: classify(computeTotal()),
+    answers: answers,
+    scores: scores,
+    userAgent: navigator.userAgent
   };
+
+  // If no endpoint configured, show message and return
   if(!POST_ENDPOINT){
     saveMsg.innerText = '저장 기능이 설정되어 있지 않습니다 (POST_ENDPOINT 비어있음).';
+    doneBtn.disabled = false;
+    saving = false;
     return;
   }
-  fetch(POST_ENDPOINT, {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)})
-    .then(r=>r.json())
-    .then(data=>{
-      saveMsg.innerText = '저장 완료';
-    }).catch(err=>{
-      console.error(err);
-      saveMsg.innerText = '저장 실패. 네트워크/서버 확인';
+
+  try {
+    const res = await fetch(POST_ENDPOINT, {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify(payload)
+    });
+
+    if(res.ok){
+      // success - Formspree typically returns 200
+      saveMsg.innerText = '제출이 완료되었습니다.';
+    } else {
+      // attempt to read JSON for message
+      let txt = '';
+      try { const j = await res.json(); txt = j.message || JSON.stringify(j); } catch(e){ txt = await res.text().catch(()=> '서버 응답 실패'); }
+      saveMsg.innerText = '저장 실패: ' + txt;
       doneBtn.disabled = false;
-    });
-});
-
-/* 도움말 */
-document.getElementById('helpBtn').addEventListener('click', ()=> {
-  alert('사전 안내\\n- 사번은 K+6자리(예: K123456) 형식으로 입력\\n- 선택지는 터치하면 자동으로 다음 문항으로 넘어갑니다');
-});
-
-/* 스크롤/키보드 보정 (모바일 전용 개선) */
-(function mobileAdjust(){
-  const main = document.getElementById('mainArea');
-  if(window.visualViewport){
-    window.visualViewport.addEventListener('resize', ()=> {
-      // 키보드 올라오면 main 높이 보정
-      main.style.height = (window.visualViewport.height - 10) + 'px';
-    });
+      saving = false;
+      return;
+    }
+  } catch(err){
+    console.error(err);
+    saveMsg.innerText = '저장 실패. 네트워크 상태를 확인하세요.';
+    doneBtn.disabled = false;
+    saving = false;
+    return;
   }
-})();
+
+  // keep button disabled to prevent re-submission
+  doneBtn.disabled = true;
+  saving = false;
+});
+
+/* =========================
+   mobile viewport handling (visualViewport-aware)
+   ========================= */
+let recalcTimer = null;
+function recalcMainHeight(){
+  if(recalcTimer) clearTimeout(recalcTimer);
+  recalcTimer = setTimeout(()=> {
+    recalcTimer = null;
+    try{
+      const headerH = document.querySelector('header')?.getBoundingClientRect().height || 64;
+      const footH = 0; // footer not fixed here
+      const vv = (window.visualViewport && window.visualViewport.height) ? window.visualViewport.height : window.innerHeight;
+      const avail = Math.max(220, Math.floor(vv - headerH - footH - 24));
+      const main = document.getElementById('mainArea');
+      if(main){
+        main.style.height = avail + 'px';
+        main.style.maxHeight = avail + 'px';
+        main.style.minHeight = avail + 'px';
+      }
+    }catch(e){ console.warn(e) }
+  }, 60);
+}
+if(window.visualViewport){
+  window.visualViewport.addEventListener('resize', ()=> recalcMainHeight());
+  window.visualViewport.addEventListener('scroll', ()=> recalcMainHeight());
+}
+window.addEventListener('resize', ()=> recalcMainHeight());
+window.addEventListener('orientationchange', ()=> setTimeout(recalcMainHeight,120));
+window.addEventListener('load', ()=> setTimeout(recalcMainHeight,120));
+
+/* focus handling to avoid iOS zoom and keep inputs visible */
+[nameInp, empInp, deptInp].forEach(inp=>{
+  inp.addEventListener('focus', ()=> { inp.style.fontSize = '17px'; setTimeout(()=> recalcMainHeight(), 120); });
+  inp.addEventListener('blur', ()=> setTimeout(()=> recalcMainHeight(), 60));
+});
+
+/* prevent double-tap zoom on iOS (soft) */
+let lastTouch = 0;
+document.addEventListener('touchend', function(e){
+  const now = Date.now();
+  if(now - lastTouch < 300){
+    e.preventDefault();
+  }
+  lastTouch = now;
+}, {passive:false});
 </script>
 </body>
 </html>
