@@ -1,0 +1,296 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1.0,maximum-scale=1.0,user-scalable=no" />
+<title>AI 업무적용 역량 인증 자가진단</title>
+<style>
+  :root{
+    --bg:#f4f6f8; --card:#fff; --primary:#1466ef; --muted:#6b7280; --radius:12px;
+    --gap:12px; --font-size:17px;
+  }
+  html,body{height:100%;margin:0;padding:0;font-family:system-ui,-apple-system,"Noto Sans KR",Roboto,Arial,sans-serif;background:var(--bg);-webkit-text-size-adjust:none; -ms-text-size-adjust:100%;}
+  /* safe area for iOS */
+  .wrap{min-height:100vh;box-sizing:border-box;padding:env(safe-area-inset-top) 14px env(safe-area-inset-bottom);display:flex;flex-direction:column;align-items:stretch;}
+  header{padding:12px 0 6px;}
+  h1{margin:0;font-size:20px}
+  .desc{color:var(--muted);font-size:13px;margin-top:6px}
+  main{flex:1;margin-top:8px;display:flex;flex-direction:column;gap:12px;overflow:auto;padding-bottom:12px;}
+  .card{background:var(--card);border-radius:10px;padding:12px;box-shadow:0 4px 12px rgba(0,0,0,0.04);}
+  label{display:block;font-size:14px;color:#111;margin-bottom:6px}
+  input[type="text"], input[type="tel"], select, textarea{
+    width:100%;box-sizing:border-box;padding:12px;border-radius:10px;border:1px solid #e6edf6;font-size:17px;background:#fff;
+  }
+  .btn-row{display:flex;gap:10px;margin-top:8px;}
+  .btn{flex:1;padding:12px;border-radius:10px;border:none;background:var(--primary);color:#fff;font-weight:600;font-size:17px;}
+  .btn.secondary{background:#fff;border:1px solid #d0d7e6;color:#333}
+  .progress{font-size:13px;color:#444;margin-bottom:6px}
+  .choices{display:flex;flex-direction:column;gap:10px;margin-top:6px}
+  .choice{padding:12px;border-radius:10px;background:#f7fbff;border:1px solid #e6eefc;text-align:left;font-size:16px;cursor:pointer}
+  .choice.selected{background:var(--primary);color:#fff;border-color:var(--primary)}
+  footer{padding:8px 0;display:flex;gap:10px;align-items:center;justify-content:center}
+  .result-big{font-size:20px;font-weight:700;color:#111;margin:10px 0}
+  /* ensure footer fixed visible on mobile while keyboard open */
+  .footer-placeholder{height:12px}
+  /* make page use full width on mobile, avoid horizontal scroll */
+  body, .wrap, main{min-width:0}
+</style>
+</head>
+<body>
+  <div class="wrap" role="application">
+    <header>
+      <h1>AI 업무적용 역량 인증 자가진단</h1>
+      <div class="desc">간단한 자가진단. 총 소요 약 5분</div>
+    </header>
+
+    <main id="mainArea">
+      <!-- Intro / 사용자 정보 -->
+      <div id="intro" class="card" aria-labelledby="introTitle">
+        <label for="name">이름</label>
+        <input id="name" type="text" placeholder="홍길동" autocomplete="name" />
+
+        <label for="employee">사번 (예: K123456)</label>
+        <input id="employee" type="text" placeholder="K123456" inputmode="text" />
+
+        <label for="dept">부서</label>
+        <input id="dept" type="text" placeholder="부서명" />
+
+        <div style="height:8px"></div>
+        <div class="btn-row">
+          <button id="startBtn" class="btn" disabled>시작하기</button>
+        </div>
+        <div style="font-size:12px;color:#777;margin-top:8px">입력 후 '시작하기'를 눌러주세요. 제출 후 수정 불가.</div>
+      </div>
+
+      <!-- Survey -->
+      <div id="survey" class="card" style="display:none">
+        <div class="progress">STEP <span id="stepNum">1</span> / <span id="totalSteps">8</span></div>
+        <div id="questionWrap"></div>
+        <div style="height:8px"></div>
+        <div style="display:flex;gap:8px;">
+          <button id="prevBtn" class="btn secondary" style="flex:0 0 120px;display:none">이전</button>
+          <button id="nextBtn" class="btn" style="flex:1">다음</button>
+        </div>
+      </div>
+
+      <!-- Result -->
+      <div id="result" class="card" style="display:none">
+        <div class="result-big">진단 결과</div>
+        <div>총점: <strong id="totalScore">0</strong></div>
+        <div style="margin-top:8px">판정: <strong id="category">-</strong></div>
+        <div style="margin-top:10px;color:#666">문의: HR부 홍길동(000)</div>
+        <div style="height:12px"></div>
+        <div style="display:flex;gap:8px;">
+          <button id="doneBtn" class="btn">제출(완료)</button>
+        </div>
+        <div id="saveMsg" style="margin-top:12px"></div>
+      </div>
+
+    </main>
+
+    <div class="footer-placeholder"></div>
+    <footer>
+      <div style="width:100%;max-width:900px;display:flex;gap:8px;">
+        <button id="helpBtn" class="btn secondary" style="flex:1">도움말</button>
+      </div>
+    </footer>
+  </div>
+
+<script>
+/* =========================
+   설정: 질문/선지/점수
+   ========================= */
+const POST_ENDPOINT = ""; // 결과를 저장할 서버(예: Apps Script web app URL). 비워두면 전송하지 않음.
+
+const questions = [
+  {"id":"Q1","text":"최근 업무에서 생성형 AI를 실제로 사용해본 경험에 가장 가까운 것은 무엇인가요?","choices":[
+    {"k":"a","t":"업무에서는 사용해본 적 없음 (개인적 사용만)","s":0},
+    {"k":"b","t":"업무 중 참고용으로 1~2회 사용","s":3},
+    {"k":"c","t":"요약·초안 등 업무 보조로 가끔 사용","s":5},
+    {"k":"d","t":"반복 업무에 정기적으로 사용","s":8},
+    {"k":"e","t":"AI 없이는 업무가 불편한 수준","s":10}]},
+  {"id":"Q2","text":"AI를 활용해 직접 수행해본 업무 형태는?","choices":[
+    {"k":"a","t":"단순 정보 질문만 수행","s":0},
+    {"k":"b","t":"문서 요약만 수행","s":3},
+    {"k":"c","t":"보고서·메일 초안 작성","s":5},
+    {"k":"d","t":"자료 조사·정리까지 수행","s":8},
+    {"k":"e","t":"반복적으로 활용중","s":10}]},
+  {"id":"Q3","text":"AI에게 질문할 때 자주 쓰는 방식은?","choices":[
+    {"k":"a","t":"한 문장 단순 요청","s":0},
+    {"k":"b","t":"결과 형식·분량만 지정","s":4},
+    {"k":"c","t":"업무 상황을 함께 설명","s":7},
+    {"k":"d","t":"AI 역할을 부여해 요청","s":11},
+    {"k":"e","t":"판단·대안까지 요구","s":15}]},
+  {"id":"Q4","text":"AI 결과가 기대와 다를 때 보통 어떻게 함?","choices":[
+    {"k":"a","t":"그대로 사용하거나 중단","s":0},
+    {"k":"b","t":"같은 질문 재입력","s":4},
+    {"k":"c","t":"조건 바꿔 재질문","s":7},
+    {"k":"d","t":"구체적 수정 요청","s":11},
+    {"k":"e","t":"단계로 나눠 재구성","s":15}]},
+  {"id":"Q5","text":"파일(PDF/엑셀) 업로드 활용 수준은?","choices":[
+    {"k":"a","t":"업로드 사용 없음","s":0},
+    {"k":"b","t":"업로드 해봤으나 업무화 X","s":4},
+    {"k":"c","t":"단일 파일 요약/질의","s":7},
+    {"k":"d","t":"파일로 특정 수치 질의","s":11},
+    {"k":"e","t":"여러 파일 비교·분석","s":15}]},
+  {"id":"Q6","text":"파일 기반 작업에서 경험은?","choices":[
+    {"k":"a","t":"파일 요약만","s":0},
+    {"k":"b","t":"특정 문장/값 찾아봄","s":4},
+    {"k":"c","t":"여러 파일 비교","s":7},
+    {"k":"d","t":"엑셀 조건·합계 질의","s":11},
+    {"k":"e","t":"오류·불일치 발견해 재질문","s":15}]},
+  {"id":"Q7","text":"AI 결과를 업무에 적용할 때 가장 가까운 행동은?","choices":[
+    {"k":"a","t":"검토 없이 그대로 사용","s":0},
+    {"k":"b","t":"중요 부분만 빠르게 확인","s":3},
+    {"k":"c","t":"수치·사실 오류 확인","s":5},
+    {"k":"d","t":"논리·표현·근거 수정해 반영","s":8},
+    {"k":"e","t":"참고로 두고 최종은 직접 작성","s":10}]},
+  {"id":"Q8","text":"보안 관련 행동 수준은?","choices":[
+    {"k":"a","t":"위험정보 구분 어려워 그대로 입력한 적 있음","s":0},
+    {"k":"b","t":"민감 정보는 피해야 한다고 생각만 함","s":3},
+    {"k":"c","t":"개인정보·카드정보는 삭제 후 입력","s":5},
+    {"k":"d","t":"원문 대신 요약·가공한 내용만 입력","s":8},
+    {"k":"e","t":"외부 공유 전 재검토·승인 절차 거침","s":10}]}
+];
+
+let answers = Array(questions.length).fill(null);
+let scores = Array(questions.length).fill(0);
+let current = 0;
+let user = {name:"", emp:"", dept:""};
+
+/* ---------- UI 핸들링 ---------- */
+const introEl = document.getElementById('intro');
+const surveyEl = document.getElementById('survey');
+const resultEl = document.getElementById('result');
+const startBtn = document.getElementById('startBtn');
+const nameInp = document.getElementById('name');
+const empInp = document.getElementById('employee');
+const deptInp = document.getElementById('dept');
+const qWrap = document.getElementById('questionWrap');
+const stepNum = document.getElementById('stepNum');
+const totalSteps = document.getElementById('totalSteps');
+const prevBtn = document.getElementById('prevBtn');
+const nextBtn = document.getElementById('nextBtn');
+const totalScoreEl = document.getElementById('totalScore');
+const categoryEl = document.getElementById('category');
+const doneBtn = document.getElementById('doneBtn');
+const saveMsg = document.getElementById('saveMsg');
+
+totalSteps.innerText = questions.length;
+
+function validateIntroInputs(){
+  const n = nameInp.value.trim(), e = empInp.value.trim(), d = deptInp.value.trim();
+  // 사번 형식 K + 6digits (대/소문자 허용)
+  const pat = /^K\d{6}$/i;
+  startBtn.disabled = !(n && e && d && pat.test(e));
+}
+nameInp.addEventListener('input', validateIntroInputs);
+empInp.addEventListener('input', validateIntroInputs);
+deptInp.addEventListener('input', validateIntroInputs);
+
+startBtn.addEventListener('click', ()=> {
+  user.name = nameInp.value.trim();
+  user.emp = empInp.value.trim().toUpperCase();
+  user.dept = deptInp.value.trim();
+  introEl.style.display = 'none';
+  surveyEl.style.display = 'block';
+  renderQuestion(0);
+});
+
+function renderQuestion(idx){
+  current = idx;
+  stepNum.innerText = idx+1;
+  const q = questions[idx];
+  qWrap.innerHTML = '';
+  const h = document.createElement('div');
+  h.style.fontWeight='700'; h.style.fontSize='16px'; h.innerText = q.text;
+  qWrap.appendChild(h);
+
+  const list = document.createElement('div'); list.className='choices';
+  q.choices.forEach((c,i)=>{
+    const b = document.createElement('button');
+    b.type='button'; b.className='choice';
+    b.innerText = c.t;
+    b.addEventListener('click', ()=>{
+      // 선택 표시
+      answers[idx] = c.k;
+      scores[idx] = c.s;
+      Array.from(list.children).forEach(ch=> ch.classList.remove('selected'));
+      b.classList.add('selected');
+      // 자동으로 다음으로 (마지막이면 제출 로직 실행)
+      setTimeout(()=> {
+        if(idx < questions.length-1) renderQuestion(idx+1);
+        else finalize();
+      }, 180);
+    });
+    // 이미 선택되어 있으면 보이기
+    if(answers[idx] && answers[idx] === c.k) b.classList.add('selected');
+    list.appendChild(b);
+  });
+  qWrap.appendChild(list);
+
+  prevBtn.style.display = idx===0 ? 'none' : 'inline-block';
+  nextBtn.style.display = 'none'; // 자동 advance 사용 -> next 숨김
+}
+
+prevBtn.addEventListener('click', ()=> {
+  if(current>0) renderQuestion(current-1);
+});
+
+/* 제출(마지막) */
+function computeTotal(){ return scores.reduce((a,b)=>a+(parseFloat(b)||0),0); }
+function classify(total){
+  if(total >= 70) return "산출물 트랙(교육 불필요)";
+  if(total >= 40) return "교육 트랙(수강 필수)";
+  return "기초 안내 대상";
+}
+
+function finalize(){
+  surveyEl.style.display = 'none';
+  resultEl.style.display = 'block';
+  const total = computeTotal();
+  totalScoreEl.innerText = total;
+  categoryEl.innerText = classify(total);
+}
+
+/* 완료(서버에 저장) */
+doneBtn.addEventListener('click', ()=> {
+  doneBtn.disabled = true;
+  saveMsg.innerText = '저장 중...';
+  const payload = {
+    timestamp: (new Date()).toISOString(),
+    user, answers, scores, total: computeTotal(), category: classify(computeTotal())
+  };
+  if(!POST_ENDPOINT){
+    saveMsg.innerText = '저장 기능이 설정되어 있지 않습니다 (POST_ENDPOINT 비어있음).';
+    return;
+  }
+  fetch(POST_ENDPOINT, {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)})
+    .then(r=>r.json())
+    .then(data=>{
+      saveMsg.innerText = '저장 완료';
+    }).catch(err=>{
+      console.error(err);
+      saveMsg.innerText = '저장 실패. 네트워크/서버 확인';
+      doneBtn.disabled = false;
+    });
+});
+
+/* 도움말 */
+document.getElementById('helpBtn').addEventListener('click', ()=> {
+  alert('사전 안내\\n- 사번은 K+6자리(예: K123456) 형식으로 입력\\n- 선택지는 터치하면 자동으로 다음 문항으로 넘어갑니다');
+});
+
+/* 스크롤/키보드 보정 (모바일 전용 개선) */
+(function mobileAdjust(){
+  const main = document.getElementById('mainArea');
+  if(window.visualViewport){
+    window.visualViewport.addEventListener('resize', ()=> {
+      // 키보드 올라오면 main 높이 보정
+      main.style.height = (window.visualViewport.height - 10) + 'px';
+    });
+  }
+})();
+</script>
+</body>
+</html>
